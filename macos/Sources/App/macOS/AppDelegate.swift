@@ -212,6 +212,23 @@ class AppDelegate: NSObject,
         // Initial config loading
         ghosttyConfigDidChange(config: ghostty.config)
 
+        // Add the viewer items to the File menu, right after "New Tab".
+        if let newTabItem = menuNewTab, let fileMenu = newTabItem.menu {
+            let viewerItem = NSMenuItem(
+                title: "Open Viewer Tab…",
+                action: #selector(openViewerTab(_:)),
+                keyEquivalent: "")
+            viewerItem.target = self
+            fileMenu.insertItem(viewerItem, at: fileMenu.index(of: newTabItem) + 1)
+
+            let splitItem = NSMenuItem(
+                title: "Open Viewer in Split…",
+                action: #selector(openViewerSplit(_:)),
+                keyEquivalent: "")
+            splitItem.target = self
+            fileMenu.insertItem(splitItem, at: fileMenu.index(of: viewerItem) + 1)
+        }
+
         // Start our update checker.
         updateController.startUpdater()
 
@@ -457,6 +474,21 @@ class AppDelegate: NSObject,
 
         var isDirectory = ObjCBool(true)
         guard FileManager.default.fileExists(atPath: filename, isDirectory: &isDirectory) else { return false }
+
+        // HTML and Markdown files open in a viewer rather than executing.
+        // If a terminal window is open, render in a split pane; otherwise open
+        // a standalone viewer tab/window.
+        if !isDirectory.boolValue {
+            let url = URL(fileURLWithPath: filename)
+            if ViewerController.supportedExtensions.contains(url.pathExtension.lowercased()) {
+                if let controller = TerminalController.preferredParent {
+                    controller.showViewer(url: url)
+                } else {
+                    ViewerController.open(fileURL: url, from: nil)
+                }
+                return true
+            }
+        }
 
         // Set to true if confirmation is required before starting up the
         // new terminal.
@@ -960,6 +992,40 @@ class AppDelegate: NSObject,
             ghostty,
             from: TerminalController.preferredParent?.window
         )
+    }
+
+    /// Opens a file picker and renders the chosen HTML/Markdown file in a viewer tab.
+    @IBAction func openViewerTab(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose an HTML or Markdown file to view"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            ViewerController.open(
+                fileURL: url,
+                from: TerminalController.preferredParent?.window)
+        }
+    }
+
+    /// Opens a file picker and renders the chosen HTML/Markdown file in a split
+    /// pane beside the focused terminal.
+    @IBAction func openViewerSplit(_ sender: Any?) {
+        guard let controller = TerminalController.preferredParent else {
+            // No terminal window to split; fall back to a viewer tab.
+            openViewerTab(sender)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose an HTML or Markdown file to view in a split"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            controller.showViewer(url: url)
+        }
     }
 
     @IBAction func closeAllWindows(_ sender: Any?) {
